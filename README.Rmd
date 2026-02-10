@@ -7,8 +7,52 @@ output: github_document
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
+  warning = FALSE,
+  error = FALSE,
+  message = FALSE,
   comment = "#>"
 )
 ```
 
 # Análise Terra Preta - Silva Ribeiro
+
+
+## Carregando Pacotes
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(vegan)
+```
+
+## Importar o BD do excel
+
+```{r}
+df <- read_xlsx("data-raw/dados_terrapreta.xlsx") |> 
+  rename(if_var = IF) |> 
+  janitor::clean_names()
+```
+
+## Salvando na Versão de R
+
+```{r}
+write_rds(df,"data/terra-preta.rds")
+```
+
+## Carregando o Banco de Dados do R
+
+```{r}
+data_set <- read_rds("data/terra-preta.rds")
+glimpse(data_set)
+```
+
+
+
+
+
+
+
+
+
+
+
