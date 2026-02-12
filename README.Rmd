@@ -20,10 +20,20 @@ knitr::opts_chunk$set(
 ## Carregando Pacotes
 
 ```{r}
+library(BiocManager)
 library(tidyverse)
+library(cluster)
+library(ggrepel)
+library(writexl)
 library(readxl)
 library(vegan)
+library(dplyr)
+library(tidyr)
+library(pls)
+# library(mixOmics)
 ```
+
+
 
 ## Importar o BD do excel
 
@@ -75,6 +85,7 @@ walk(nome_vars,~{
   print(plot_box)
 })
 ```
+
 
 ### Tabela da Estatistica Descriva
 
@@ -174,15 +185,275 @@ data_set |>
          cl.length = 5,
          number.cex = 0.8)
 ```
+
 ## Análise Multivariada
 
 ### Análise de Cluster
+#Distância Euclidiana + cluster hierárquico
 
-### Análise de Componentes Principais
+```{r}
+
+tmp <- data_set %>% 
+  select(tratamentos, ds:mg) %>%    tidyr::drop_na()
+
+x <- tmp %>%
+  select(ds:mg)
+
+grupo <- tmp %>%
+  pull(tratamentos) %>%
+  factor()
+
+xsc <- scale(x)
+
+# COMPARAÇÃO DE DISTÂNCIA HIERARQUICA
+dist_euc  <- dist(xsc, method = "euclidean")
+dist_man  <- dist(xsc, method = "manhattan")
+dist_mink <- dist(xsc, method = "minkowski", p = 3)
+
+hc_euc  <- hclust(dist_euc,  method = "ward.D2")
+hc_man  <- hclust(dist_man,  method = "ward.D2")
+hc_mink <- hclust(dist_mink, method = "ward.D2")
+
+#DENDROGRAMAS COMPARATIVOS
+par(mfrow = c(1, 3))
+plot(hc_euc, labels = grupo, main = "Ward + Euclidiana", cex = 0.6)
+plot(hc_man, labels = grupo, main = "Ward + Manhattan",  cex = 0.6)
+plot(hc_mink, labels = grupo, main = "Ward + Minkowski (p=3)", cex = 0.6)
+par(mfrow = c(1, 1))
+
+# DEDROGRAMA DISTÂNCIA EUCLIDEANA + CORTE K
+distancia <- dist(xsc, method = "euclidean")
+
+cluster <- hclust(distancia, method = "ward.D2")
+
+plot(cluster,
+     labels = grupo,
+     main = "Dendrograma (Ward.D2) - dados padronizados",
+     xlab = "", 
+     sub = "",
+     cex = 0.6)
+
+k <- 4
+rect.hclust(cluster, k = k, border = 2:5)
+
+cl <- cutree(cluster, k = k)
+
+table(Cluster = cl, Tratamento = grupo)
+
+
+#VALIDAÇÃO
+sil <- silhouette(cl, distancia)
+plot(sil, main = "Silhouette - Cluster Hierárquico (Ward)")
+summary(sil)
+
+set.seed(123)
+
+wcss <- sapply(1:10, function(k){
+  km <- kmeans(xsc, centers = k, nstart = 25)
+  km$tot.withinss
+})
+
+plot(1:10, wcss, type = "b",
+     xlab = "Número de clusters (k)",
+     ylab = "WCSS (Within-Cluster Sum of Squares)",
+     main = "Elbow Method (k-means) - apoio para escolha de k")
+
+
+
+```
+### Análise de Componentes Principais (PCA)
+
+```{r}
+
+pca <- prcomp(xsc, center = TRUE, scale. = FALSE)
+summary(pca) 
+
+var_exp <- (pca$sdev^2) / sum(pca$sdev^2)
+
+plot(var_exp, type = "b",
+     xlab = "Componente Principal",
+     ylab = "Proporção da Variância Explicada",
+     main = "Scree Plot (PCA)")
+
+scores <- as.data.frame(pca$x) %>%
+  mutate(tratamentos = grupo)
+
+loadings <- as.data.frame(pca$rotation) %>%
+  rownames_to_column("variavel")
+
+top_pc1 <- loadings %>%
+  mutate(abs_val = abs(PC1)) %>%
+  arrange(desc(abs_val)) %>%
+  slice(1:10)
+
+top_pc2 <- loadings %>%
+  mutate(abs_val = abs(PC2)) %>%
+  arrange(desc(abs_val)) %>%
+  slice(1:10)
+
+top_pc1
+top_pc2
+
+
+ggplot(scores, aes(PC1, PC2, color = tratamentos)) +
+  geom_point(size = 3, alpha = 0.85) +
+  stat_ellipse(level = 0.95, linewidth = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "PCA — Distribuição das amostras",
+    x = paste0("PC1 (", round(100 * var_exp[1], 1), "%)"),
+    y = paste0("PC2 (", round(100 * var_exp[2], 1), "%)")
+  )
+
+
+
+load_plot <- loadings %>%
+  mutate(contrib = abs(PC1) + abs(PC2)) %>%
+  arrange(desc(contrib)) %>%
+  slice(1:8)
+
+mul <- 2
+
+load_plot <- load_plot %>%
+  mutate(PC1 = PC1 * mul, PC2 = PC2 * mul)
+
+ggplot(scores, aes(PC1, PC2, color = tratamentos)) +
+  geom_point(size = 3, alpha = 0.85) +
+  stat_ellipse(level = 0.95) +
+  geom_segment(
+    data = load_plot,
+    aes(x = 0, y = 0, xend = PC1, yend = PC2),
+    inherit.aes = FALSE,
+    arrow = arrow(length = grid::unit(0.2, "cm"))
+  ) +
+  geom_text_repel(
+    data = load_plot,
+    aes(PC1, PC2, label = variavel),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  theme_minimal() +
+  labs(title = "Biplot PCA")
+
+
+
+```
 
 ### Análise de Redundância
 
-### PLS - Partial Least Squares (mínimos quadrados parciais)
+```{r}
+
+Y <- tmp %>%
+  select(ds:mg)
+
+X <- tmp %>%
+  transmute(tratamentos = factor(tratamentos))
+
+Ysc <- scale(Y)
+
+rda_mod <- rda(Ysc ~ tratamentos, data = X)
+
+summary(rda_mod)
+eigenvals(rda_mod)  
+
+prop <- eigenvals(rda_mod) / sum(eigenvals(rda_mod))
+prop
+
+anova(rda_mod, permutations = 999)
+anova(rda_mod, by = "axis", permutations = 999)
+anova(rda_mod, by = "terms", permutations = 999)
+
+plot(rda_mod, type = "n", main = "RDA (Y ~ tratamentos) - dados padronizados")
+points(rda_mod, display = "sites", pch = 19, col = as.numeric(X$tratamentos))
+text(rda_mod, display = "bp", cex = 0.8)  
+legend("topright", legend = levels(X$tratamentos),
+       col = seq_along(levels(X$tratamentos)), pch = 19, bty = "n")
+
+```
+
+
+### PLS - Partial Least Squares (mínimos quadrados parciais
+
+```{r}
+glimpse(data_set)
+
+```
+
+
+```{r}
+
+tmp <- data_set %>%
+  dplyr::select(tratamentos, where(is.numeric)) %>%
+  tidyr::drop_na()
+
+X <- tmp %>% dplyr::select(-tratamentos) %>% as.matrix()
+Xsc <- scale(X)
+
+# PLS
+
+Y_class <- tmp %>% pull(tratamentos) %>% factor()
+
+Y_dummy <- model.matrix(~ Y_class - 1)
+
+set.seed(123)
+plsda_mod <- plsr(Y_dummy ~ Xsc, ncomp = 10, validation = "CV")
+
+summary(plsda_mod)
+plot(RMSEP(plsda_mod))
+
+ncomp_use <- 2
+
+pred <- predict(plsda_mod, ncomp = ncomp_use)
+pred_mat <- pred[, , 1]
+
+pred_class <- colnames(pred_mat)[max.col(pred_mat)]
+pred_class <- gsub("^Y_class", "", pred_class)
+
+table(Real = Y_class, Previsto = pred_class)
+
+# PLS REGRESSÃO
+
+if ("if_var" %in% names(tmp) && is.numeric(tmp$if_var)) {
+
+  Y_cont <- tmp$if_var
+
+  set.seed(123)
+  plsr_mod <- plsr(Y_cont ~ Xsc, ncomp = 10, validation = "CV")
+
+  summary(plsr_mod)
+
+  plot(RMSEP(plsr_mod))
+  plot(R2(plsr_mod))
+
+  coef(plsr_mod, ncomp = 2)
+}
+```
+
+# gráfico
+
+```{r}
+scores_pls <- scores(plsda_mod, ncomp = ncomp_use)
+
+plot(scores_pls[,1], scores_pls[,2],
+     pch = 19,
+     col = as.numeric(Y_class),
+     xlab = "PLS comp 1",
+     ylab = "PLS comp 2",
+     main = "PLS-DA — Scores dos indivíduos")
+
+legend("bottom",
+       legend = levels(Y_class),
+       col = seq_along(levels(Y_class)),
+       pch = 19,
+       horiz = TRUE,
+       inset = -0.25,
+       xpd = TRUE,
+       bty = "n")
+
+abline(h = pretty(scores_pls[,2]), col = "gray90")
+abline(v = pretty(scores_pls[,1]), col = "gray90")
+```
+
 
 
 
